@@ -94,7 +94,10 @@ export async function handleComment(value, ownerId) {
   if (!commentId) return;
   if (fromId && (fromId === ownerId || fromId === IG_USER_ID)) return; // تعليقاتك انت
   const rule = findRule(text, mediaId);
-  if (!rule) return;
+  if (!rule) {
+    console.log(`  تعليق "${text}" ما بيه كلمة من الكلمات (البوست ${mediaId})`);
+    return;
+  }
   if (!markHandled(commentId)) return;
 
   console.log(`تعليق مطابق من @${value?.from?.username ?? "?"}: "${text}"`);
@@ -143,8 +146,12 @@ app.get("/webhook", (req, res) => {
 
 // الإشعارات
 app.post("/webhook", (req, res) => {
-  if (!validSignature(req)) return res.sendStatus(401);
+  if (!validSignature(req)) {
+    console.error("✗ وصل إشعار بس التوقيع غلط — تأكد إن APP_SECRET هو المفتاح السري لنفس التطبيق");
+    return res.sendStatus(401);
+  }
   res.sendStatus(200); // نرد بسرعة حتى Meta ما تعيد الإرسال
+  console.log("📩 وصل إشعار من Meta:", JSON.stringify(req.body).slice(0, 500));
 
   for (const entry of req.body?.entry ?? []) {
     for (const change of entry.changes ?? []) {
