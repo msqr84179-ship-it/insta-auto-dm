@@ -11,6 +11,10 @@ const {
   GRAPH_VERSION = "v23.0",
   GRAPH_HOST = "graph.facebook.com", // التطبيقات الجديدة (تسجيل الدخول الموحّد) تستخدم هذا
   DRY_RUN = "false",     // true = يطبع بس وما يرسل (للتجربة)
+  POLL_SECONDS = "30",   // كل كم ثانية يفحص التعليقات الجديدة (0 = يطفي الفحص ويعتمد على الـ webhook بس)
+  POLL_MEDIA = "10",     // كم آخر بوست/ريل يفحص
+  LOOKBACK_MINUTES = "30", // وقت ما يشتغل السيرفر، يرد على التعليقات من آخر كم دقيقة
+  RENDER_EXTERNAL_URL,   // Render يحطه وحده — نستخدمه حتى السيرفر ما ينام
 } = process.env;
 
 const dryRun = DRY_RUN === "true";
@@ -84,6 +88,19 @@ async function replyPublicly(commentId, text) {
   return igPost(`${commentId}/replies`, { message: text });
 }
 
+export let igGet = async (path, params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  const res = await fetch(`https://${GRAPH_HOST}/${GRAPH_VERSION}/${path}${qs ? "?" + qs : ""}`, {
+    headers: { Authorization: `Bearer ${IG_ACCESS_TOKEN}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`${res.status} ${JSON.stringify(data)}`);
+  return data;
+};
+export function setIgGet(fn) { igGet = fn; } // للتجربة
+
+let ownUsername = null;
+
 // ---------- معالجة تعليق واحد ----------
 export async function handleComment(value, ownerId) {
   const commentId = value?.id;
@@ -93,6 +110,7 @@ export async function handleComment(value, ownerId) {
 
   if (!commentId) return;
   if (fromId && (fromId === ownerId || fromId === IG_USER_ID)) return; // تعليقاتك انت
+  if (ownUsername && value?.from?.username === ownUsername) return;
   const rule = findRule(text, mediaId);
   if (!rule) {
     console.log(`  تعليق "${text}" ما بيه كلمة من الكلمات (البوست ${mediaId})`);
@@ -174,8 +192,70 @@ app.post("/webhook", (req, res) => {
   }
 });
 
+// ---------- فحص التعليقات الجديدة بشكل دوري ----------
+// Meta ما تدز إشعارات التعليقات الحقيقية إلا إذا التطبيق عنده "وصول متقدم" (يحتاج مراجعة وتوثيق تجاري).
+// فبدالها السيرفر نفسه يسأل انستغرام كل شوية: شنو التعليقات الجديدة على آخر البوستات؟
+const seen = new Set();
+let since = Date.now() - Number(LOOKBACK_MINUTES) * 60_000;
+
+export async function pollOnce() {
+  const data = await igGet(`${IG_USER_ID}/media`, {
+    fields: "id,comments.limit(50){id,text,timestamp,username,from}",
+    limit: String(POLL_MEDIA),
+  });
+  for (const media of data.data ?? []) {
+    for (const c of media.comments?.data ?? []) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      if (seen.size > 20000) seen.delete(seen.values().next().value);
+      const t = Date.parse(String(c.timestamp).replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
+      if (Number.isFinite(t) && t < since) continue; // تعليق قديم
+      await handleComment({
+        id: c.id,
+        text: c.text,
+        from: { id: c.from?.id, username: c.from?.username ?? c.username },
+        media: { id: media.id },
+      }, IG_USER_ID);
+    }
+  }
+}
+
+async function startPolling() {
+  const every = Number(POLL_SECONDS);
+  if (!every) return;
+  try {
+    const me = await igGet(IG_USER_ID, { fields: "username" });
+    ownUsername = me.username;
+    console.log(`✓ التوكن شغّال — الحساب: @${ownUsername}`);
+  } catch (e) {
+    console.error("✗ التوكن ما اشتغل — طلّع توكن جديد وحطه بـ IG_ACCESS_TOKEN:", e.message);
+  }
+  // نحاول نشغّل اشتراك الـ webhook للحساب (إذا صار عنده وصول متقدم بعدين يشتغل وحده)
+  try {
+    await igPost(`${IG_USER_ID}/subscribed_apps?subscribed_fields=comments`, {});
+  } catch (e) {
+    console.log("ملاحظة: اشتراك الـ webhook للحساب:", e.message.slice(0, 200));
+  }
+  console.log(`🔎 يفحص التعليقات الجديدة كل ${every} ثانية على آخر ${POLL_MEDIA} بوستات`);
+  const tick = async () => {
+    try { await pollOnce(); }
+    catch (e) { console.error("✗ خطأ بفحص التعليقات:", e.message.slice(0, 300)); }
+    setTimeout(tick, every * 1000);
+  };
+  tick();
+}
+
+// النسخة المجانية من Render تنام إذا ما أحد زارها 15 دقيقة، فنزورها كل 10 دقايق
+function keepAwake() {
+  if (!RENDER_EXTERNAL_URL) return;
+  setInterval(() => fetch(RENDER_EXTERNAL_URL).catch(() => {}), 10 * 60_000);
+}
+
 if (process.env.NODE_ENV !== "test") {
-  app.listen(PORT, () => console.log(`السيرفر شغّال على البورت ${PORT}${dryRun ? " (DRY_RUN)" : ""}`));
+  app.listen(PORT, () => {
+    console.log(`السيرفر شغّال على البورت ${PORT}${dryRun ? " (DRY_RUN)" : ""}`);
+    if (!dryRun) { startPolling(); keepAwake(); }
+  });
 }
 
 export default app;
