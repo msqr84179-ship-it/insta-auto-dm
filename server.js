@@ -136,6 +136,18 @@ function validSignature(req) {
 
 app.get("/", (_req, res) => res.send("insta-auto-dm شغّال ✅"));
 
+// سياسة الخصوصية (Meta تطلب رابطها حتى تنشر التطبيق)
+app.get("/privacy", (_req, res) => {
+  res.type("html").send(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>سياسة الخصوصية</title>
+<style>body{font-family:system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 16px;line-height:1.8}</style></head><body>
+<h1>سياسة الخصوصية</h1>
+<p>هذه الأداة ترسل رسالة خاصة تلقائية على Instagram لمن يعلّق بكلمة معيّنة على منشورات حسابنا.</p>
+<p>البيانات المستخدمة: معرّف التعليق ونصّه واسم المستخدم، فقط لغرض إرسال الرد. لا نخزّن هذه البيانات ولا نبيعها ولا نشاركها مع أي جهة.</p>
+<p>حذف البيانات: لا نحتفظ بأي بيانات. للاستفسار راسلنا على Instagram.</p>
+</body></html>`);
+});
+
 // تحقق Meta من الرابط (مرة وحدة وقت تضيف الـ webhook)
 app.get("/webhook", (req, res) => {
   if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
