@@ -1,0 +1,17 @@
+{
+  "name": "insta-auto-dm",
+  "version": "1.0.0",
+  "description": "Instagram comment-to-DM: send an automatic DM when someone comments a keyword",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
