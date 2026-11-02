@@ -78,7 +78,7 @@ async function igPost(path, body) {
 }
 
 async function sendPrivateReply(commentId, text) {
-  return igPost(`${IG_USER_ID}/messages`, {
+  return igPost(`${igId}/messages`, {
     recipient: { comment_id: commentId },
     message: { text },
   });
@@ -100,6 +100,7 @@ export let igGet = async (path, params = {}) => {
 export function setIgGet(fn) { igGet = fn; } // للتجربة
 
 let ownUsername = null;
+let igId = IG_USER_ID; // ممكن يتغير إذا اكتشفنا الرقم الصحيح للحساب
 
 // ---------- معالجة تعليق واحد ----------
 export async function handleComment(value, ownerId) {
@@ -109,7 +110,7 @@ export async function handleComment(value, ownerId) {
   const mediaId = value?.media?.id;
 
   if (!commentId) return;
-  if (fromId && (fromId === ownerId || fromId === IG_USER_ID)) return; // تعليقاتك انت
+  if (fromId && (fromId === ownerId || fromId === IG_USER_ID || fromId === igId)) return; // تعليقاتك انت
   if (ownUsername && value?.from?.username === ownUsername) return;
   const rule = findRule(text, mediaId);
   if (!rule) {
@@ -199,7 +200,7 @@ const seen = new Set();
 let since = Date.now() - Number(LOOKBACK_MINUTES) * 60_000;
 
 export async function pollOnce() {
-  const data = await igGet(`${IG_USER_ID}/media`, {
+  const data = await igGet(`${igId}/media`, {
     fields: "id,comments.limit(50){id,text,timestamp,username,from}",
     limit: String(POLL_MEDIA),
   });
@@ -215,24 +216,53 @@ export async function pollOnce() {
         text: c.text,
         from: { id: c.from?.id, username: c.from?.username ?? c.username },
         media: { id: media.id },
-      }, IG_USER_ID);
+      }, igId);
     }
   }
+}
+
+// نتأكد إن التوكن يوصل للحساب، وإذا الرقم غلط نحاول نلكى الرقم الصحيح وحده
+async function findAccount() {
+  try {
+    const me = await igGet(igId, { fields: "username" });
+    ownUsername = me.username;
+    console.log(`✓ التوكن شغّال — الحساب: @${ownUsername} (${igId})`);
+    return;
+  } catch (e) {
+    console.error(`✗ التوكن ما يوصل للرقم ${igId}:`, e.message.slice(0, 200));
+  }
+  const tries = [
+    ["me", { fields: "id,name" }],
+    ["me/accounts", { fields: "name,instagram_business_account{id,username}" }],
+    ["me/instagram_accounts", { fields: "id,username" }],
+  ];
+  for (const [path, params] of tries) {
+    try {
+      const r = await igGet(path, params);
+      console.log(`🔍 ${path}:`, JSON.stringify(r).slice(0, 400));
+      const found =
+        r.data?.find((p) => p.instagram_business_account)?.instagram_business_account ||
+        (path === "me/instagram_accounts" ? r.data?.[0] : null);
+      if (found?.id) {
+        igId = found.id;
+        ownUsername = found.username ?? null;
+        console.log(`✓ لكيت رقم الحساب الصحيح: ${igId} (@${ownUsername}) — حطه بـ IG_USER_ID`);
+        return;
+      }
+    } catch (e) {
+      console.log(`🔍 ${path}: ✗`, e.message.slice(0, 200));
+    }
+  }
+  console.error("✗ التوكن ما يوصل لأي حساب انستغرام — لازم تختار حساب raqeem_1 وقت تطلّع التوكن");
 }
 
 async function startPolling() {
   const every = Number(POLL_SECONDS);
   if (!every) return;
-  try {
-    const me = await igGet(IG_USER_ID, { fields: "username" });
-    ownUsername = me.username;
-    console.log(`✓ التوكن شغّال — الحساب: @${ownUsername}`);
-  } catch (e) {
-    console.error("✗ التوكن ما اشتغل — طلّع توكن جديد وحطه بـ IG_ACCESS_TOKEN:", e.message);
-  }
+  await findAccount();
   // نحاول نشغّل اشتراك الـ webhook للحساب (إذا صار عنده وصول متقدم بعدين يشتغل وحده)
   try {
-    await igPost(`${IG_USER_ID}/subscribed_apps?subscribed_fields=comments`, {});
+    await igPost(`${igId}/subscribed_apps?subscribed_fields=comments`, {});
   } catch (e) {
     console.log("ملاحظة: اشتراك الـ webhook للحساب:", e.message.slice(0, 200));
   }
