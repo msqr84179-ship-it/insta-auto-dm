@@ -13,8 +13,8 @@ export const RULES = [
     mediaIds: [],
   },
   {
-    keywords: ["سعر", "السعر", "بكم", "price"],
-    message: "هلا 🌟 الأسعار كلها هنا: https://example.com",
+    keywords: ["raqeem", "الرقيم", "رقيم", "سعر","السعر"],
+    message: "السعر 350 الف دينار عراقي",
     publicReply: "شوف الخاص 📩",
     mediaIds: [],
   },
